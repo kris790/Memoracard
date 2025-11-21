@@ -2,53 +2,63 @@
 
 MemoraCard is a focused, mobile-first flashcard study application designed to help users create decks, manage cards, and study effectively on a single device.
 
-## Features (MVP)
+## Features
 
+### Core Functionality
 *   **Deck Management**: Create, rename, and delete flashcard decks.
 *   **Card Management**: Add, edit, and remove cards (Question/Answer) within decks.
-*   **Study Mode**:
-    *   Distraction-free study interface.
-    *   Tap-to-flip card animation.
-    *   Self-rating system (Correct/Incorrect).
-    *   Session queue management (Incorrect cards return to the queue).
-    *   Session summary statistics.
+*   **Validation**: Input validation for deck names and card content.
 *   **Persistence**: All data is saved locally to the browser's `localStorage`.
-*   **Mobile-First Design**: Responsive UI optimized for touch interactions.
+
+### Study Experience
+*   **Distraction-free Interface**: Clean UI focused on the content.
+*   **Interactive Study**: Tap-to-flip card animation.
+*   **Session Logic**: Self-rating system with immediate re-queueing for incorrect answers.
+*   **Progress Tracking**: Session summary statistics upon completion.
+
+### Technical Features
+*   **Storage Limits**: Enforced limits (100 decks, 1000 cards/deck, 10k total) to ensure stable performance in the browser.
+*   **Spaced Repetition Data Layer**: Data models are architected to support the SM-2 algorithm (Intervals, Ease Factors, Due Dates).
+*   **Mobile-First**: Responsive design with touch-friendly targets and transitions.
 
 ## Tech Stack
 
-*   **Core**: React 19, TypeScript
+*   **Framework**: React 19 with TypeScript
 *   **Styling**: Tailwind CSS
+*   **State/Storage**: LocalStorage via an async Service pattern (mimicking React Native AsyncStorage)
 *   **Icons**: Lucide React
-*   **Animations**: Framer Motion
-*   **Utilities**:
-    *   `uuid` for unique identifiers
-    *   `dayjs` for date formatting
-    *   `clsx` / `tailwind-merge` for class management
+*   **Animation**: Framer Motion
+*   **Date Handling**: Day.js
 
 ## Project Structure
 
 ```
 /
-├── index.html              # Entry point
+├── index.html              # Entry point & Import Map
 ├── index.tsx               # React root
-├── App.tsx                 # Main routing logic
-├── types.ts                # TypeScript interfaces
+├── App.tsx                 # Main Application Controller
+├── types.ts                # Data Models (Deck, Flashcard, SR Settings)
+├── checklist.md            # Project Roadmap & Status
 ├── services/
-│   └── storage.ts          # LocalStorage abstraction layer
+│   └── storage.ts          # Storage Service with Limit Enforcement
 ├── components/
-│   ├── DeckList.tsx        # Home screen with deck grid
-│   ├── DeckDetail.tsx      # Card list and management
+│   ├── DeckList.tsx        # Dashboard
+│   ├── DeckDetail.tsx      # Deck management
 │   ├── StudySession.tsx    # Active study flow
 │   └── ui/
-│       └── Button.tsx      # Reusable button component
-└── README.md               # Project documentation
+│       └── Button.tsx      # Shared UI components
+└── README.md               # Documentation
 ```
+
+## Data Models
+
+The application uses a robust data structure designed to support Spaced Repetition features:
+
+*   **Decks**: Contain settings for the SM-2 algorithm (Initial Interval, Ease Factor).
+*   **Flashcards**: Track their own study history including `interval`, `repetition`, `easeFactor`, and `dueDate`.
 
 ## Development
 
-This project uses a standard React setup with ES modules.
-
-1.  **Dependencies**: All dependencies are imported via the import map in `index.html` from `https://aistudiocdn.com`. No `npm install` is strictly required for the runtime in this specific environment, but standard local development would require installing the packages listed in the import map.
-
-2.  **Storage**: Data is stored in `localStorage` under keys `memoracard_decks` and `memoracard_cards`. To reset the app, clear your browser's local storage.
+1.  **Environment**: Browser-based development. No build step required for the provided `index.html` as it uses ES Modules.
+2.  **Dependencies**: Loaded via CDN import maps (React, ReactDOM, Framer Motion, etc.).
+3.  **Resetting Data**: Clear `localStorage` to reset the app to the initial state (sample data will regenerate).

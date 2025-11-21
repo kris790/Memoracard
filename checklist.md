@@ -1,11 +1,27 @@
 # MemoraCard MVP Checklist
 
+## 🚀 Spaced Repetition (New Priority)
+
+- [x] **Data Model Updates**
+  - *Action:* Add SM-2 fields (interval, easeFactor, dueDate) to `Flashcard` type.
+  - *Status:* Completed in `types.ts`.
+
+- [x] **Algorithm Implementation**
+  - *Action:* Implement the SM-2 algorithm logic to calculate next review date based on rating (Again/Hard/Good/Easy).
+  - *Status:* Implemented in `services/storage.ts`.
+
+- [x] **Study Session Integration**
+  - *Action:* Update `StudySession.tsx` to:
+    - Show 4 rating buttons (Again, Hard, Good, Easy) instead of just Correct/Incorrect.
+    - Save the review result to storage.
+    - Prioritize cards where `dueDate <= Date.now()`.
+  - *Status:* Implemented in `components/StudySession.tsx`.
+
 ## 🔴 Critical Missing Features (From Spec)
 
-- [ ] **Enforce Storage Limits**
+- [x] **Enforce Storage Limits**
   - *Spec:* Max 100 decks, Max 1000 cards per deck, Max 10,000 total cards.
-  - *Current:* No limits enforced in `storage.ts`.
-  - *Action:* Add checks in `createDeck` and `addCard` functions.
+  - *Status:* Implemented in `storage.ts`.
 
 - [ ] **Session Persistence (Resume)**
   - *Spec:* "App background: Save session state, allow resume on return".
@@ -31,6 +47,3 @@
 - [ ] **Storage Optimization**
   - *Current:* Reads entire JSON blob for every operation.
   - *Action:* While fine for MVP, consider basic memoization or splitting storage keys if performance drops with >1000 cards.
-
-- [ ] **Test Coverage**
-  - *Action:* Add basic unit tests for `storage.ts` logic (limits, CRUD).

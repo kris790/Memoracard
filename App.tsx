@@ -1,13 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DeckList } from './components/DeckList';
 import { DeckDetail } from './components/DeckDetail';
 import { StudySession } from './components/StudySession';
 import { Deck, Flashcard, ScreenName } from './types';
+import { StorageService } from './services/storage';
 
 const App: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<ScreenName>('DECK_LIST');
   const [activeDeck, setActiveDeck] = useState<Deck | null>(null);
   const [studyCards, setStudyCards] = useState<Flashcard[]>([]);
+
+  useEffect(() => {
+    // Initialize sample data for new users
+    StorageService.initializeSampleData().catch(console.error);
+  }, []);
 
   // Navigation Handlers
   const navigateToDeck = (deck: Deck) => {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, BookOpen, Trash2, CalendarClock } from 'lucide-react';
 import { Deck } from '../types';
-import { storageService } from '../services/storage';
+import { StorageService } from '../services/storage';
 import { Button } from './ui/Button';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
@@ -17,33 +17,47 @@ export const DeckList: React.FC<DeckListProps> = ({ onSelectDeck }) => {
   const [isCreating, setIsCreating] = useState(false);
   const [newDeckName, setNewDeckName] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     loadDecks();
   }, []);
 
-  const loadDecks = () => {
-    setDecks(storageService.getDecks());
+  const loadDecks = async () => {
+    setLoading(true);
+    try {
+      const data = await StorageService.getAllDecks();
+      setDecks(data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleCreate = (e: React.FormEvent) => {
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = newDeckName.trim();
     if (trimmed.length === 0 || trimmed.length > 100) {
       setError('Name must be 1-100 characters');
       return;
     }
-    storageService.createDeck(trimmed);
-    setNewDeckName('');
-    setIsCreating(false);
-    setError('');
-    loadDecks();
+    
+    try {
+      await StorageService.createDeck(trimmed);
+      setNewDeckName('');
+      setIsCreating(false);
+      setError('');
+      loadDecks();
+    } catch (err: any) {
+      setError(err.message || 'Failed to create deck');
+    }
   };
 
-  const handleDelete = (e: React.MouseEvent, id: string) => {
+  const handleDelete = async (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     if (confirm('Are you sure you want to delete this deck? This cannot be undone.')) {
-      storageService.deleteDeck(id);
+      await StorageService.deleteDeck(id);
       loadDecks();
     }
   };
@@ -84,7 +98,9 @@ export const DeckList: React.FC<DeckListProps> = ({ onSelectDeck }) => {
             </form>
           )}
 
-          {decks.length === 0 && !isCreating ? (
+          {loading ? (
+            <div className="text-center py-10 text-gray-500">Loading decks...</div>
+          ) : decks.length === 0 && !isCreating ? (
             <div className="text-center py-20 px-4">
               <div className="bg-indigo-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                 <BookOpen className="text-indigo-600" size={32} />

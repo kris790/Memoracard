@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { X, RotateCw, CheckCircle, XCircle } from 'lucide-react';
-import { Flashcard, Deck } from '../types';
+import React, { useState, useEffect } from 'react';
+import { X, CheckCircle, Clock, Zap, RotateCcw, Star } from 'lucide-react';
+import { Flashcard, Deck, CardRating } from '../types';
 import { Button } from './ui/Button';
-import { storageService } from '../services/storage';
+import { StorageService } from '../services/storage';
 import { motion, AnimatePresence } from 'framer-motion';
 
 interface StudySessionProps {
@@ -11,69 +11,64 @@ interface StudySessionProps {
   onExit: () => void;
 }
 
-interface SessionSummary {
-  studied: number;
-  correct: number;
-  incorrect: number;
-}
-
 export const StudySession: React.FC<StudySessionProps> = ({ deck, initialCards, onExit }) => {
   // Queue Management
   const [queue, setQueue] = useState<Flashcard[]>([]);
-  const [completedCards, setCompletedCards] = useState<string[]>([]); // IDs
-  const [incorrectCards, setIncorrectCards] = useState<string[]>([]); // IDs
+  const [incorrectCards, setIncorrectCards] = useState<Set<string>>(new Set()); // Track IDs of cards rated 'again'
   
   const [isFlipped, setIsFlipped] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
 
-  // Initialize Session
+  // Initialize Session - Prioritize Due Cards
   useEffect(() => {
-    // Shuffle algorithm (Fisher-Yates)
-    const shuffled = [...initialCards];
-    for (let i = shuffled.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    setQueue(shuffled);
+    // Sort cards: Overdue/Due (dueDate <= now) first, then by dueDate ascending
+    const sorted = [...initialCards].sort((a, b) => {
+      const dateA = a.dueDate || 0;
+      const dateB = b.dueDate || 0;
+      return dateA - dateB;
+    });
+    setQueue(sorted);
   }, [initialCards]);
 
   const currentCard = queue[0];
-  const progress = initialCards.length > 0 
-    ? Math.round(((initialCards.length - queue.length + (incorrectCards.includes(currentCard?.id) ? 0 : 0)) / initialCards.length) * 100) 
-    : 0;
 
   const handleFlip = () => {
     setIsFlipped(!isFlipped);
   };
 
-  const handleRate = (correct: boolean) => {
+  const handleRate = async (rating: CardRating) => {
     if (!currentCard) return;
+
+    // Save Review Immediately (Persistence)
+    await StorageService.processCardReview(currentCard.id, rating);
 
     // Animation delay for UX
     setTimeout(() => {
       setIsFlipped(false);
       
-      if (correct) {
-        // Remove from queue
-        setCompletedCards(prev => [...prev, currentCard.id]);
-        setQueue(prev => prev.slice(1));
-      } else {
-        // Incorrect: Move to back of queue
-        setIncorrectCards(prev => prev.includes(currentCard.id) ? prev : [...prev, currentCard.id]);
+      if (rating === 'again') {
+        // Incorrect: Track statistic and Re-queue at end of session
+        setIncorrectCards(prev => new Set(prev).add(currentCard.id));
         setQueue(prev => {
           const next = prev.slice(1);
           return [...next, currentCard];
         });
+      } else {
+        // Correct (Hard/Good/Easy): Remove from queue
+        setQueue(prev => prev.slice(1));
       }
-    }, 200);
+    }, 150);
   };
 
   // Check for completion
   useEffect(() => {
-    if (queue.length === 0 && initialCards.length > 0) {
-      setIsFinished(true);
-      storageService.updateDeckLastStudied(deck.id);
-    }
+    const checkCompletion = async () => {
+        if (queue.length === 0 && initialCards.length > 0) {
+          setIsFinished(true);
+          await StorageService.updateDeckLastStudied(deck.id);
+        }
+    };
+    checkCompletion();
   }, [queue.length, deck.id, initialCards.length]);
 
   if (isFinished) {
@@ -88,11 +83,11 @@ export const StudySession: React.FC<StudySessionProps> = ({ deck, initialCards, 
         <div className="grid grid-cols-2 gap-4 w-full max-w-xs mb-8">
           <div className="bg-green-50 p-4 rounded-xl border border-green-100">
             <p className="text-green-800 text-sm font-medium">Mastered</p>
-            <p className="text-3xl font-bold text-green-600">{initialCards.length - incorrectCards.length}</p>
+            <p className="text-3xl font-bold text-green-600">{initialCards.length - incorrectCards.size}</p>
           </div>
-          <div className="bg-orange-50 p-4 rounded-xl border border-orange-100">
-            <p className="text-orange-800 text-sm font-medium">Needs Review</p>
-            <p className="text-3xl font-bold text-orange-600">{incorrectCards.length}</p>
+          <div className="bg-red-50 p-4 rounded-xl border border-red-100">
+            <p className="text-red-800 text-sm font-medium">Review Again</p>
+            <p className="text-3xl font-bold text-red-600">{incorrectCards.size}</p>
           </div>
         </div>
 
@@ -159,8 +154,8 @@ export const StudySession: React.FC<StudySessionProps> = ({ deck, initialCards, 
       </div>
 
       {/* Controls */}
-      <div className="bg-white p-6 pb-8 border-t border-gray-200 safe-area-pb">
-        <div className="max-w-md mx-auto grid grid-cols-2 gap-4">
+      <div className="bg-white p-4 pb-8 border-t border-gray-200 safe-area-pb">
+        <div className="max-w-md mx-auto">
           <AnimatePresence mode='wait'>
             {!isFlipped ? (
                <motion.div 
@@ -168,7 +163,6 @@ export const StudySession: React.FC<StudySessionProps> = ({ deck, initialCards, 
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -10 }}
-                className="col-span-2"
                >
                   <Button 
                     onClick={handleFlip} 
@@ -180,31 +174,63 @@ export const StudySession: React.FC<StudySessionProps> = ({ deck, initialCards, 
                   </Button>
                </motion.div>
             ) : (
-              <>
+              <div className="grid grid-cols-4 gap-2">
+                {/* Again */}
                 <motion.button
-                   key="incorrect"
-                   initial={{ opacity: 0, x: -20 }}
-                   animate={{ opacity: 1, x: 0 }}
+                   key="again"
+                   initial={{ opacity: 0, y: 20 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   transition={{ delay: 0 }}
                    whileTap={{ scale: 0.95 }}
-                   onClick={() => handleRate(false)}
-                   className="flex flex-col items-center justify-center p-4 rounded-xl bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 transition-colors"
+                   onClick={() => handleRate('again')}
+                   className="flex flex-col items-center justify-center p-3 rounded-lg bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 transition-colors"
                 >
-                  <XCircle size={32} className="mb-1" />
-                  <span className="font-medium">Incorrect</span>
+                  <RotateCcw size={20} className="mb-1" />
+                  <span className="text-xs font-bold uppercase">Again</span>
                 </motion.button>
 
+                {/* Hard */}
                 <motion.button
-                   key="correct"
-                   initial={{ opacity: 0, x: 20 }}
-                   animate={{ opacity: 1, x: 0 }}
+                   key="hard"
+                   initial={{ opacity: 0, y: 20 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   transition={{ delay: 0.05 }}
                    whileTap={{ scale: 0.95 }}
-                   onClick={() => handleRate(true)}
-                   className="flex flex-col items-center justify-center p-4 rounded-xl bg-green-50 text-green-600 border border-green-100 hover:bg-green-100 transition-colors"
+                   onClick={() => handleRate('hard')}
+                   className="flex flex-col items-center justify-center p-3 rounded-lg bg-orange-50 text-orange-600 border border-orange-100 hover:bg-orange-100 transition-colors"
                 >
-                  <CheckCircle size={32} className="mb-1" />
-                  <span className="font-medium">Correct</span>
+                  <Clock size={20} className="mb-1" />
+                  <span className="text-xs font-bold uppercase">Hard</span>
                 </motion.button>
-              </>
+
+                {/* Good */}
+                <motion.button
+                   key="good"
+                   initial={{ opacity: 0, y: 20 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   transition={{ delay: 0.1 }}
+                   whileTap={{ scale: 0.95 }}
+                   onClick={() => handleRate('good')}
+                   className="flex flex-col items-center justify-center p-3 rounded-lg bg-green-50 text-green-600 border border-green-100 hover:bg-green-100 transition-colors"
+                >
+                  <CheckCircle size={20} className="mb-1" />
+                  <span className="text-xs font-bold uppercase">Good</span>
+                </motion.button>
+
+                {/* Easy */}
+                <motion.button
+                   key="easy"
+                   initial={{ opacity: 0, y: 20 }}
+                   animate={{ opacity: 1, y: 0 }}
+                   transition={{ delay: 0.15 }}
+                   whileTap={{ scale: 0.95 }}
+                   onClick={() => handleRate('easy')}
+                   className="flex flex-col items-center justify-center p-3 rounded-lg bg-sky-50 text-sky-600 border border-sky-100 hover:bg-sky-100 transition-colors"
+                >
+                  <Star size={20} className="mb-1" />
+                  <span className="text-xs font-bold uppercase">Easy</span>
+                </motion.button>
+              </div>
             )}
           </AnimatePresence>
         </div>

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Plus, Play, Edit2, Trash2 } from 'lucide-react';
 import { Deck, Flashcard } from '../types';
-import { storageService } from '../services/storage';
+import { StorageService } from '../services/storage';
 import { Button } from './ui/Button';
 
 interface DeckDetailProps {
@@ -36,8 +36,9 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
     setCurrentDeckName(deck.name);
   }, [deck.name]);
 
-  const loadCards = () => {
-    setCards(storageService.getCards(deck.id));
+  const loadCards = async () => {
+    const deckCards = await StorageService.getCardsByDeck(deck.id);
+    setCards(deckCards);
   };
 
   // Deck Name Handlers
@@ -47,7 +48,7 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
     setIsEditDeckModalOpen(true);
   };
 
-  const handleUpdateDeckName = (e: React.FormEvent) => {
+  const handleUpdateDeckName = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = editDeckName.trim();
     if (trimmed.length === 0 || trimmed.length > 100) {
@@ -55,7 +56,7 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
       return;
     }
     
-    storageService.updateDeck(deck.id, trimmed);
+    await StorageService.updateDeckName(deck.id, trimmed);
     setCurrentDeckName(trimmed);
     setIsEditDeckModalOpen(false);
   };
@@ -77,7 +78,7 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
     setIsModalOpen(true);
   };
 
-  const handleSaveCard = (e: React.FormEvent) => {
+  const handleSaveCard = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!question.trim() || !answer.trim()) {
       setError('Both question and answer are required.');
@@ -92,18 +93,22 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
         return;
     }
 
-    if (editingCard) {
-      storageService.updateCard(editingCard.id, question, answer);
-    } else {
-      storageService.addCard(deck.id, question, answer);
+    try {
+      if (editingCard) {
+        await StorageService.updateCardContent(editingCard.id, question, answer);
+      } else {
+        await StorageService.addCard(deck.id, question, answer);
+      }
+      setIsModalOpen(false);
+      loadCards();
+    } catch (err: any) {
+      setError(err.message || "Failed to save card");
     }
-    setIsModalOpen(false);
-    loadCards();
   };
 
-  const handleDeleteCard = (id: string) => {
+  const handleDeleteCard = async (id: string) => {
     if (confirm('Delete this card?')) {
-      storageService.deleteCard(id);
+      await StorageService.deleteCard(id);
       loadCards();
     }
   };
