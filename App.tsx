@@ -41,6 +41,10 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeckUpdate = (updatedDeck: Deck) => {
+    setActiveDeck(updatedDeck);
+  };
+
   return (
     <div className="h-screen w-full max-w-md mx-auto bg-white shadow-2xl overflow-hidden relative sm:my-8 sm:rounded-3xl sm:h-[800px] sm:border-[8px] sm:border-gray-800">
       {/* Mobile Status Bar Simulation (Visual only) */}
@@ -55,6 +59,7 @@ const App: React.FC = () => {
           deck={activeDeck} 
           onBack={navigateToHome}
           onStartStudy={startStudySession}
+          onUpdateDeck={handleDeckUpdate}
         />
       )}
 

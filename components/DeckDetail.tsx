@@ -8,9 +8,10 @@ interface DeckDetailProps {
   deck: Deck;
   onBack: () => void;
   onStartStudy: (cards: Flashcard[]) => void;
+  onUpdateDeck?: (deck: Deck) => void;
 }
 
-export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStudy }) => {
+export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStudy, onUpdateDeck }) => {
   const [cards, setCards] = useState<Flashcard[]>([]);
   
   // Deck Name Editing State
@@ -56,9 +57,16 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
       return;
     }
     
-    await StorageService.updateDeckName(deck.id, trimmed);
-    setCurrentDeckName(trimmed);
-    setIsEditDeckModalOpen(false);
+    try {
+      await StorageService.updateDeckName(deck.id, trimmed);
+      setCurrentDeckName(trimmed);
+      if (onUpdateDeck) {
+        onUpdateDeck({ ...deck, name: trimmed });
+      }
+      setIsEditDeckModalOpen(false);
+    } catch (err: any) {
+      setEditDeckError(err.message || 'Failed to update deck name');
+    }
   };
 
   // Card Handlers
