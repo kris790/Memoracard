@@ -4,15 +4,35 @@ import { DeckDetail } from './components/DeckDetail';
 import { StudySession } from './components/StudySession';
 import { Deck, Flashcard, ScreenName } from './types';
 import { StorageService } from './services/storage';
+import { DataProvider } from './contexts/DataContext';
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [currentScreen, setCurrentScreen] = useState<ScreenName>('DECK_LIST');
   const [activeDeck, setActiveDeck] = useState<Deck | null>(null);
   const [studyCards, setStudyCards] = useState<Flashcard[]>([]);
 
   useEffect(() => {
-    // Initialize sample data for new users
-    StorageService.initializeSampleData().catch(console.error);
+    const init = async () => {
+      // Initialize sample data for new users
+      await StorageService.initializeSampleData().catch(console.error);
+
+      // Check for active session to resume
+      const savedSession = await StorageService.getActiveSession();
+      if (savedSession) {
+        const decks = await StorageService.getAllDecks();
+        const deck = decks.find(d => d.id === savedSession.deckId);
+        if (deck) {
+          const cards = await StorageService.getCardsByDeck(deck.id);
+          setActiveDeck(deck);
+          setStudyCards(cards);
+          setCurrentScreen('STUDY_SESSION');
+        } else {
+          await StorageService.clearSession();
+        }
+      }
+    };
+    
+    init();
   }, []);
 
   // Navigation Handlers
@@ -26,14 +46,14 @@ const App: React.FC = () => {
     setCurrentScreen('DECK_LIST');
   };
 
-  const startStudySession = (cards: Flashcard[]) => {
+  const startStudySession = async (cards: Flashcard[]) => {
+    await StorageService.clearSession();
     setStudyCards(cards);
     setCurrentScreen('STUDY_SESSION');
   };
 
-  const endStudySession = () => {
-    // Refresh the deck list view to show updated timestamps if we went back home, 
-    // but here we go back to detail view as per spec
+  const endStudySession = async () => {
+    await StorageService.clearSession();
     if (activeDeck) {
       setCurrentScreen('DECK_DETAIL');
     } else {
@@ -47,7 +67,6 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen w-full max-w-md mx-auto bg-white shadow-2xl overflow-hidden relative sm:my-8 sm:rounded-3xl sm:h-[800px] sm:border-[8px] sm:border-gray-800">
-      {/* Mobile Status Bar Simulation (Visual only) */}
       <div className="h-1 w-full bg-gray-100 sm:hidden"></div>
 
       {currentScreen === 'DECK_LIST' && (
@@ -71,6 +90,14 @@ const App: React.FC = () => {
         />
       )}
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <DataProvider>
+      <AppContent />
+    </DataProvider>
   );
 };
 

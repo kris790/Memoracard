@@ -23,16 +23,15 @@
   - *Spec:* Max 100 decks, Max 1000 cards per deck, Max 10,000 total cards.
   - *Status:* Implemented in `storage.ts`.
 
-- [ ] **Session Persistence (Resume)**
+- [x] **Session Persistence (Resume)**
   - *Spec:* "App background: Save session state, allow resume on return".
-  - *Current:* Session state is lost on page refresh/close.
-  - *Action:* Save `StudySessionState` to `localStorage` on change; check for saved session on app load.
+  - *Status:* Implemented. Session state is saved to `localStorage` and resumed on app launch in `App.tsx`.
 
 ## 🟡 UX & UI Polish
 
-- [ ] **Custom Confirmation Dialogs**
-  - *Current:* Uses native `window.confirm()` for deletions.
-  - *Action:* Create a `<ConfirmationModal />` component for a consistent UI experience when deleting decks or cards.
+- [x] **Custom Confirmation Dialogs**
+  - *Current:* Custom `ConfirmationModal` component implemented.
+  - *Status:* Replaced native `window.confirm()` in DeckList and DeckDetail.
 
 - [ ] **Accessibility (a11y)**
   - *Current:* Basic semantic HTML.

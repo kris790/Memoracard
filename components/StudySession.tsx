@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, CheckCircle, Clock, Zap, RotateCcw, Star } from 'lucide-react';
-import { Flashcard, Deck, CardRating } from '../types';
-import { Button } from './ui/Button';
+import { ArrowLeft, RotateCcw, Check, Clock, BarChart3, Star, CheckCircle } from 'lucide-react';
+import { Deck, Flashcard, CardRating, StudySessionStats } from '../types';
 import { StorageService } from '../services/storage';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Button } from './ui/Button';
+import { useData } from '../contexts/DataContext';
 
 interface StudySessionProps {
   deck: Deck;
@@ -12,229 +12,386 @@ interface StudySessionProps {
 }
 
 export const StudySession: React.FC<StudySessionProps> = ({ deck, initialCards, onExit }) => {
+  const { refreshData } = useData();
+  
   // Queue Management
   const [queue, setQueue] = useState<Flashcard[]>([]);
-  const [incorrectCards, setIncorrectCards] = useState<Set<string>>(new Set()); // Track IDs of cards rated 'again'
+  // We track total cards to show progress relative to the start of the session
+  const [totalSessionCards, setTotalSessionCards] = useState(initialCards.length);
   
   const [isFlipped, setIsFlipped] = useState(false);
-  const [isFinished, setIsFinished] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [showSummary, setShowSummary] = useState(false);
+  const [sessionStartTime] = useState(Date.now());
 
-  // Initialize Session - Prioritize Due Cards
+  // Stats State
+  const [sessionStats, setSessionStats] = useState<StudySessionStats>({
+    totalStudied: 0,
+    correctCount: 0,
+    incorrectCount: 0,
+    sessionDuration: 0,
+    cardsByRating: {
+      again: 0,
+      hard: 0,
+      good: 0,
+      easy: 0
+    }
+  });
+
+  // Initialize Session
   useEffect(() => {
-    // Sort cards: Overdue/Due (dueDate <= now) first, then by dueDate ascending
-    const sorted = [...initialCards].sort((a, b) => {
-      const dateA = a.dueDate || 0;
-      const dateB = b.dueDate || 0;
-      return dateA - dateB;
-    });
-    setQueue(sorted);
-  }, [initialCards]);
+    const initSession = async () => {
+      try {
+        const savedSession = await StorageService.getActiveSession();
+        
+        if (savedSession && savedSession.deckId === deck.id) {
+          // RESUME: Use saved queue
+          setQueue(savedSession.queue);
+          // Approximate total based on max seen or initial
+          setTotalSessionCards(Math.max(initialCards.length, savedSession.queue.length));
+        } else {
+          // NEW: Prioritize Due Cards
+          const sorted = [...initialCards].sort((a, b) => {
+            // Due cards (dueDate <= now) come first
+            const now = Date.now();
+            const aDue = a.dueDate <= now;
+            const bDue = b.dueDate <= now;
+            
+            if (aDue && !bDue) return -1;
+            if (!aDue && bDue) return 1;
+            
+            // If both due or both not due, sort by dueDate ascending (oldest due first)
+            return (a.dueDate || 0) - (b.dueDate || 0);
+          });
+          setQueue(sorted);
+          setTotalSessionCards(sorted.length);
+        }
+      } catch (e) {
+        console.error("Failed to init session", e);
+        setQueue(initialCards);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    initSession();
+  }, [deck.id, initialCards]);
+
+  // Persistence: Save state whenever queue changes
+  useEffect(() => {
+    if (!isLoading && !showSummary && queue.length > 0) {
+      StorageService.saveSession({
+        deckId: deck.id,
+        queue,
+        incorrectCardIds: [] // Not strictly used in this view but part of type
+      });
+    }
+  }, [queue, deck.id, isLoading, showSummary]);
 
   const currentCard = queue[0];
+  // Calculate progress based on cards removed from the queue (successfully studied)
+  // Note: 'Again' cards stay in queue, so progress doesn't advance, which is correct behavior
+  const progress = totalSessionCards > 0 
+    ? ((totalSessionCards - queue.length) / totalSessionCards) * 100 
+    : 100;
+
+  const isDueCard = currentCard && currentCard.dueDate <= Date.now();
 
   const handleFlip = () => {
-    setIsFlipped(!isFlipped);
+    if (!isFlipped) {
+      setIsFlipped(true);
+    }
   };
 
-  const handleRate = async (rating: CardRating) => {
+  const handleRating = async (rating: CardRating) => {
     if (!currentCard) return;
 
-    // Save Review Immediately (Persistence)
+    // 1. Update DB with SM-2 Algorithm via StorageService
     await StorageService.processCardReview(currentCard.id, rating);
 
-    // Animation delay for UX
-    setTimeout(() => {
+    // 2. Update Session Stats
+    setSessionStats(prev => ({
+      ...prev,
+      totalStudied: prev.totalStudied + 1,
+      correctCount: rating !== 'again' ? prev.correctCount + 1 : prev.correctCount,
+      incorrectCount: rating === 'again' ? prev.incorrectCount + 1 : prev.incorrectCount,
+      cardsByRating: {
+        ...prev.cardsByRating,
+        [rating]: prev.cardsByRating[rating] + 1
+      },
+      sessionDuration: Math.floor((Date.now() - sessionStartTime) / 1000)
+    }));
+
+    // 3. Manage Queue
+    if (rating === 'again') {
+      // Incorrect: Move to end of queue to review again this session
+      setQueue(prev => {
+        const [head, ...tail] = prev;
+        return [...tail, head];
+      });
       setIsFlipped(false);
-      
-      if (rating === 'again') {
-        // Incorrect: Track statistic and Re-queue at end of session
-        setIncorrectCards(prev => new Set(prev).add(currentCard.id));
-        setQueue(prev => {
-          const next = prev.slice(1);
-          return [...next, currentCard];
-        });
-      } else {
-        // Correct (Hard/Good/Easy): Remove from queue
-        setQueue(prev => prev.slice(1));
+    } else {
+      // Correct (Hard/Good/Easy): Remove from queue
+      const newQueue = queue.slice(1);
+      setQueue(newQueue);
+      setIsFlipped(false);
+
+      if (newQueue.length === 0) {
+        await finishSession();
       }
-    }, 150);
+    }
   };
 
-  // Check for completion
-  useEffect(() => {
-    const checkCompletion = async () => {
-        if (queue.length === 0 && initialCards.length > 0) {
-          setIsFinished(true);
-          await StorageService.updateDeckLastStudied(deck.id);
-        }
-    };
-    checkCompletion();
-  }, [queue.length, deck.id, initialCards.length]);
+  const finishSession = async () => {
+    const endDuration = Math.floor((Date.now() - sessionStartTime) / 1000);
+    setSessionStats(prev => ({ ...prev, sessionDuration: endDuration }));
+    
+    await StorageService.updateDeckLastStudied(deck.id);
+    await StorageService.clearSession();
+    await refreshData();
+    setShowSummary(true);
+  };
 
-  if (isFinished) {
+  const handleRestart = () => {
+    // Reset to initial state but shuffled or sorted? 
+    // For restart, let's just reload initialCards
+    setQueue(initialCards);
+    setTotalSessionCards(initialCards.length);
+    setIsFlipped(false);
+    setShowSummary(false);
+    setSessionStats({
+      totalStudied: 0,
+      correctCount: 0,
+      incorrectCount: 0,
+      sessionDuration: 0,
+      cardsByRating: { again: 0, hard: 0, good: 0, easy: 0 }
+    });
+  };
+
+  const getRatingButtonColor = (rating: CardRating) => {
+    switch (rating) {
+      case 'again': return 'bg-red-500 hover:bg-red-600 shadow-red-100';
+      case 'hard': return 'bg-orange-500 hover:bg-orange-600 shadow-orange-100';
+      case 'good': return 'bg-green-500 hover:bg-green-600 shadow-green-100';
+      case 'easy': return 'bg-blue-500 hover:bg-blue-600 shadow-blue-100';
+    }
+  };
+
+  const getRatingButtonText = (rating: CardRating) => {
+    switch (rating) {
+      case 'again': return 'Again';
+      case 'hard': return 'Hard';
+      case 'good': return 'Good';
+      case 'easy': return 'Easy';
+    }
+  };
+
+  if (isLoading) {
+    return <div className="flex h-full items-center justify-center text-gray-500">Loading session...</div>;
+  }
+
+  if (showSummary) {
     return (
-      <div className="flex flex-col h-full bg-white p-6 items-center justify-center text-center animate-in zoom-in-95 duration-300">
-        <div className="w-20 h-20 bg-indigo-100 rounded-full flex items-center justify-center mb-6 text-indigo-600">
-          <CheckCircle size={48} />
-        </div>
-        <h2 className="text-3xl font-bold text-gray-900 mb-2">Session Complete!</h2>
-        <p className="text-gray-600 mb-8">You've reviewed all cards in <strong>{deck.name}</strong>.</p>
-        
-        <div className="grid grid-cols-2 gap-4 w-full max-w-xs mb-8">
-          <div className="bg-green-50 p-4 rounded-xl border border-green-100">
-            <p className="text-green-800 text-sm font-medium">Mastered</p>
-            <p className="text-3xl font-bold text-green-600">{initialCards.length - incorrectCards.size}</p>
+      <div className="flex flex-col h-full bg-gray-50 animate-in fade-in duration-300">
+        {/* Header */}
+        <header className="bg-white border-b border-gray-200 px-4 py-4">
+          <div className="max-w-2xl mx-auto w-full">
+            <div className="flex items-center gap-3 mb-2">
+              <button
+                onClick={onExit}
+                className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+                title="Back to deck"
+              >
+                <ArrowLeft size={20} className="text-gray-600" />
+              </button>
+              <h1 className="text-xl font-bold text-gray-900">Session Complete!</h1>
+            </div>
           </div>
-          <div className="bg-red-50 p-4 rounded-xl border border-red-100">
-            <p className="text-red-800 text-sm font-medium">Review Again</p>
-            <p className="text-3xl font-bold text-red-600">{incorrectCards.size}</p>
-          </div>
-        </div>
+        </header>
 
-        <div className="space-y-3 w-full max-w-xs">
-          <Button onClick={() => window.location.reload()} fullWidth>Study Again</Button>
-          <Button variant="secondary" onClick={onExit} fullWidth>Back to Deck</Button>
+        {/* Summary Content */}
+        <main className="flex-1 overflow-y-auto p-4">
+          <div className="max-w-2xl mx-auto w-full">
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div className="text-center mb-6">
+                <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <Check className="text-green-600" size={32} />
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">Great job!</h2>
+                <p className="text-gray-600">You studied {sessionStats.totalStudied} cards</p>
+              </div>
+
+              {/* Stats Grid */}
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                <div className="text-center p-4 bg-blue-50 rounded-lg">
+                  <div className="text-2xl font-bold text-blue-600">{sessionStats.correctCount}</div>
+                  <div className="text-sm text-blue-600">Passed</div>
+                </div>
+                <div className="text-center p-4 bg-red-50 rounded-lg">
+                  <div className="text-2xl font-bold text-red-600">{sessionStats.incorrectCount}</div>
+                  <div className="text-sm text-red-600">Again</div>
+                </div>
+                <div className="text-center p-4 bg-purple-50 rounded-lg">
+                  <div className="text-2xl font-bold text-purple-600">
+                    {sessionStats.totalStudied > 0 
+                      ? Math.round((sessionStats.correctCount / sessionStats.totalStudied) * 100)
+                      : 0}%
+                  </div>
+                  <div className="text-sm text-purple-600">Accuracy</div>
+                </div>
+                <div className="text-center p-4 bg-orange-50 rounded-lg">
+                  <div className="text-2xl font-bold text-orange-600">
+                    {Math.floor(sessionStats.sessionDuration / 60)}m {sessionStats.sessionDuration % 60}s
+                  </div>
+                  <div className="text-sm text-orange-600">Time</div>
+                </div>
+              </div>
+
+              {/* Rating Breakdown */}
+              <div className="border-t border-gray-200 pt-4">
+                <h3 className="font-semibold text-gray-900 mb-3 flex items-center gap-2">
+                  <BarChart3 size={18} />
+                  Rating Breakdown
+                </h3>
+                <div className="space-y-2">
+                  {(['again', 'hard', 'good', 'easy'] as CardRating[]).map(rating => (
+                    <div key={rating} className="flex items-center justify-between">
+                      <span className="capitalize text-gray-600">{rating}</span>
+                      <span className="font-semibold text-gray-900">
+                        {sessionStats.cardsByRating[rating]}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex gap-3 mt-6">
+              <Button
+                onClick={handleRestart}
+                variant="ghost"
+                className="flex-1 justify-center"
+              >
+                <RotateCcw size={20} />
+                Study Again
+              </Button>
+              <Button
+                onClick={onExit}
+                className="flex-1 justify-center"
+              >
+                Finish
+              </Button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  if (!currentCard) {
+    // Fallback for empty queue start
+    return (
+      <div className="flex flex-col h-full bg-gray-50 items-center justify-center p-4">
+        <div className="text-center">
+          <div className="bg-yellow-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Clock className="text-yellow-600" size={32} />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-2">No cards to study</h2>
+          <p className="text-gray-600 mb-6">All cards are up to date!</p>
+          <Button onClick={onExit}>Back to Deck</Button>
         </div>
       </div>
     );
   }
 
-  if (!currentCard) return <div className="p-8 text-center">Loading session...</div>;
-
   return (
-    <div className="flex flex-col h-full bg-gray-100">
+    <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
-      <div className="px-4 py-4 flex justify-between items-center bg-white shadow-sm z-10">
-        <span className="font-mono text-sm font-medium text-gray-500">
-          {initialCards.length - queue.length + 1} / {initialCards.length}
-        </span>
-        <button onClick={onExit} className="text-gray-400 hover:text-gray-600">
-          <X size={24} />
-        </button>
-      </div>
-      
-      {/* Progress Bar */}
-      <div className="h-1 bg-gray-200 w-full">
-        <div 
-          className="h-full bg-indigo-500 transition-all duration-500 ease-out" 
-          style={{ width: `${((initialCards.length - queue.length) / initialCards.length) * 100}%` }}
-        />
-      </div>
+      <header className="bg-white border-b border-gray-200 px-4 py-4">
+        <div className="max-w-2xl mx-auto w-full">
+          <div className="flex items-center gap-3 mb-2">
+            <button
+              onClick={onExit}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+              title="Back to deck"
+            >
+              <ArrowLeft size={20} className="text-gray-600" />
+            </button>
+            <div className="flex-1 min-w-0">
+              <h1 className="text-lg font-bold text-gray-900 truncate">{deck.name}</h1>
+              <p className="text-sm text-gray-500">
+                {queue.length} cards remaining
+                {!isDueCard && " (Reviewing ahead)"}
+              </p>
+            </div>
+          </div>
 
-      {/* Card Area */}
-      <div className="flex-1 flex flex-col items-center justify-center p-6 perspective-1000 overflow-hidden">
-        <div 
-          className="relative w-full max-w-md aspect-[3/4] max-h-[60vh] cursor-pointer"
-          onClick={handleFlip}
-        >
-           <motion.div
-            className="w-full h-full relative transform-style-3d"
-            initial={false}
-            animate={{ rotateY: isFlipped ? 180 : 0 }}
-            transition={{ duration: 0.3, ease: "easeInOut" }}
+          {/* Progress Bar */}
+          <div className="w-full bg-gray-200 rounded-full h-2 overflow-hidden">
+            <div 
+              className="bg-indigo-600 h-2 rounded-full transition-all duration-500 ease-out"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+      </header>
+
+      {/* Card Content */}
+      <main className="flex-1 flex items-center justify-center p-6 overflow-hidden">
+        <div className="w-full max-w-md h-full flex flex-col justify-center">
+          {/* Flashcard */}
+          <div 
+            onClick={handleFlip}
+            className={`relative bg-white rounded-2xl shadow-lg border-2 p-6 cursor-pointer transition-all duration-500 min-h-[300px] flex flex-col items-center justify-center
+              ${isFlipped ? 'border-indigo-300 bg-indigo-50 rotate-y-180' : 'border-gray-200 hover:border-indigo-200'}`}
+            style={{ perspective: '1000px' }}
           >
-            {/* Front (Question) */}
-            <div className="absolute inset-0 backface-hidden bg-white rounded-2xl shadow-xl border border-gray-100 flex flex-col items-center justify-center p-8 text-center">
-              <span className="absolute top-6 left-6 text-xs font-bold text-indigo-500 uppercase tracking-wider">Question</span>
-              <p className="text-2xl md:text-3xl font-medium text-gray-800 leading-relaxed overflow-y-auto max-h-full no-scrollbar">
-                {currentCard.question}
-              </p>
-              <p className="absolute bottom-6 text-sm text-gray-400 animate-pulse">Tap to flip</p>
+            <div className="text-center w-full">
+              {!isFlipped ? (
+                <div className="animate-in fade-in duration-200">
+                  <div className="text-xs font-bold tracking-widest text-indigo-500 mb-6 uppercase">Question</div>
+                  <p className="text-2xl md:text-3xl text-gray-900 whitespace-pre-wrap leading-relaxed font-medium">
+                    {currentCard.question}
+                  </p>
+                  <div className="absolute bottom-6 left-0 right-0 text-center">
+                    <p className="text-sm text-gray-400 animate-pulse">Tap to reveal</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="animate-in fade-in duration-200">
+                  <div className="text-xs font-bold tracking-widest text-green-600 mb-6 uppercase">Answer</div>
+                  <p className="text-xl md:text-2xl text-gray-800 whitespace-pre-wrap leading-relaxed">
+                    {currentCard.answer}
+                  </p>
+                  <div className="h-8"></div> {/* Spacer */}
+                </div>
+              )}
             </div>
+          </div>
 
-            {/* Back (Answer) */}
-            <div className="absolute inset-0 backface-hidden rotate-y-180 bg-indigo-50 rounded-2xl shadow-xl border border-indigo-100 flex flex-col items-center justify-center p-8 text-center">
-              <span className="absolute top-6 left-6 text-xs font-bold text-indigo-600 uppercase tracking-wider">Answer</span>
-              <p className="text-xl md:text-2xl text-gray-800 leading-relaxed overflow-y-auto max-h-full no-scrollbar">
-                {currentCard.answer}
-              </p>
+          {/* Rating Buttons */}
+          {isFlipped ? (
+            <div className="grid grid-cols-4 gap-2 mt-8 animate-in slide-in-from-bottom-4 duration-300">
+              {(['again', 'hard', 'good', 'easy'] as CardRating[]).map(rating => (
+                <Button
+                  key={rating}
+                  onClick={() => handleRating(rating)}
+                  className={`${getRatingButtonColor(rating)} text-white flex-col py-3 h-auto gap-1 shadow-sm border-none`}
+                >
+                  {rating === 'again' && <RotateCcw size={18} />}
+                  {rating === 'hard' && <Clock size={18} />}
+                  {rating === 'good' && <CheckCircle size={18} />}
+                  {rating === 'easy' && <Star size={18} />}
+                  <span className="text-xs font-bold uppercase">{getRatingButtonText(rating)}</span>
+                </Button>
+              ))}
             </div>
-          </motion.div>
+          ) : (
+            <div className="h-[76px] mt-8"></div> // Placeholder to prevent layout jump
+          )}
         </div>
-      </div>
-
-      {/* Controls */}
-      <div className="bg-white p-4 pb-8 border-t border-gray-200 safe-area-pb">
-        <div className="max-w-md mx-auto">
-          <AnimatePresence mode='wait'>
-            {!isFlipped ? (
-               <motion.div 
-                key="flip-prompt"
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-               >
-                  <Button 
-                    onClick={handleFlip} 
-                    size="lg" 
-                    fullWidth 
-                    className="bg-gray-900 hover:bg-gray-800 text-white"
-                  >
-                    Show Answer
-                  </Button>
-               </motion.div>
-            ) : (
-              <div className="grid grid-cols-4 gap-2">
-                {/* Again */}
-                <motion.button
-                   key="again"
-                   initial={{ opacity: 0, y: 20 }}
-                   animate={{ opacity: 1, y: 0 }}
-                   transition={{ delay: 0 }}
-                   whileTap={{ scale: 0.95 }}
-                   onClick={() => handleRate('again')}
-                   className="flex flex-col items-center justify-center p-3 rounded-lg bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 transition-colors"
-                >
-                  <RotateCcw size={20} className="mb-1" />
-                  <span className="text-xs font-bold uppercase">Again</span>
-                </motion.button>
-
-                {/* Hard */}
-                <motion.button
-                   key="hard"
-                   initial={{ opacity: 0, y: 20 }}
-                   animate={{ opacity: 1, y: 0 }}
-                   transition={{ delay: 0.05 }}
-                   whileTap={{ scale: 0.95 }}
-                   onClick={() => handleRate('hard')}
-                   className="flex flex-col items-center justify-center p-3 rounded-lg bg-orange-50 text-orange-600 border border-orange-100 hover:bg-orange-100 transition-colors"
-                >
-                  <Clock size={20} className="mb-1" />
-                  <span className="text-xs font-bold uppercase">Hard</span>
-                </motion.button>
-
-                {/* Good */}
-                <motion.button
-                   key="good"
-                   initial={{ opacity: 0, y: 20 }}
-                   animate={{ opacity: 1, y: 0 }}
-                   transition={{ delay: 0.1 }}
-                   whileTap={{ scale: 0.95 }}
-                   onClick={() => handleRate('good')}
-                   className="flex flex-col items-center justify-center p-3 rounded-lg bg-green-50 text-green-600 border border-green-100 hover:bg-green-100 transition-colors"
-                >
-                  <CheckCircle size={20} className="mb-1" />
-                  <span className="text-xs font-bold uppercase">Good</span>
-                </motion.button>
-
-                {/* Easy */}
-                <motion.button
-                   key="easy"
-                   initial={{ opacity: 0, y: 20 }}
-                   animate={{ opacity: 1, y: 0 }}
-                   transition={{ delay: 0.15 }}
-                   whileTap={{ scale: 0.95 }}
-                   onClick={() => handleRate('easy')}
-                   className="flex flex-col items-center justify-center p-3 rounded-lg bg-sky-50 text-sky-600 border border-sky-100 hover:bg-sky-100 transition-colors"
-                >
-                  <Star size={20} className="mb-1" />
-                  <span className="text-xs font-bold uppercase">Easy</span>
-                </motion.button>
-              </div>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
+      </main>
     </div>
   );
 };

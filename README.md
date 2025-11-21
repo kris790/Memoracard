@@ -8,24 +8,25 @@ MemoraCard is a focused, mobile-first flashcard study application designed to he
 *   **Deck Management**: Create, rename, and delete flashcard decks.
 *   **Card Management**: Add, edit, and remove cards (Question/Answer) within decks.
 *   **Validation**: Input validation for deck names and card content.
-*   **Persistence**: All data is saved locally to the browser's `localStorage`.
+*   **Global State**: Instant state synchronization across screens using React Context.
 
 ### Study Experience
 *   **Distraction-free Interface**: Clean UI focused on the content.
-*   **Interactive Study**: Tap-to-flip card animation.
-*   **Session Logic**: Self-rating system with immediate re-queueing for incorrect answers.
-*   **Progress Tracking**: Session summary statistics upon completion.
+*   **Spaced Repetition (SM-2)**: Intelligent scheduling algorithm (Again/Hard/Good/Easy) that prioritizes due cards.
+*   **Session Resume**: Automatically saves your place in a study session so you can close the app and resume later.
+*   **Progress Tracking**: Detailed session summary statistics with rating breakdown.
 
 ### Technical Features
-*   **Storage Limits**: Enforced limits (100 decks, 1000 cards/deck, 10k total) to ensure stable performance in the browser.
-*   **Spaced Repetition Data Layer**: Data models are architected to support the SM-2 algorithm (Intervals, Ease Factors, Due Dates).
-*   **Mobile-First**: Responsive design with touch-friendly targets and transitions.
+*   **Storage Limits**: Enforced limits (100 decks, 1000 cards/deck, 10k total) to ensure stable performance.
+*   **Data Persistence**: Robust local storage implementation mimicking async patterns.
+*   **Mobile-First**: Responsive design with touch-friendly targets, transitions, and custom confirmation dialogs.
 
 ## Tech Stack
 
 *   **Framework**: React 19 with TypeScript
+*   **State Management**: React Context API + Hooks
 *   **Styling**: Tailwind CSS
-*   **State/Storage**: LocalStorage via an async Service pattern (mimicking React Native AsyncStorage)
+*   **Storage**: LocalStorage via `StorageService`
 *   **Icons**: Lucide React
 *   **Animation**: Framer Motion
 *   **Date Handling**: Day.js
@@ -39,14 +40,17 @@ MemoraCard is a focused, mobile-first flashcard study application designed to he
 ├── App.tsx                 # Main Application Controller
 ├── types.ts                # Data Models (Deck, Flashcard, SR Settings)
 ├── checklist.md            # Project Roadmap & Status
+├── contexts/
+│   └── DataContext.tsx     # Global State Provider
 ├── services/
-│   └── storage.ts          # Storage Service with Limit Enforcement
+│   └── storage.ts          # Storage Service with SM-2 & Limits
 ├── components/
 │   ├── DeckList.tsx        # Dashboard
 │   ├── DeckDetail.tsx      # Deck management
-│   ├── StudySession.tsx    # Active study flow
+│   ├── StudySession.tsx    # Active study flow (SM-2 logic)
 │   └── ui/
-│       └── Button.tsx      # Shared UI components
+│       ├── Button.tsx      # Shared Button component
+│       └── ConfirmationModal.tsx # Shared Dialog component
 └── README.md               # Documentation
 ```
 

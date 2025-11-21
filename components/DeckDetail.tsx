@@ -3,6 +3,8 @@ import { ArrowLeft, Plus, Play, Edit2, Trash2 } from 'lucide-react';
 import { Deck, Flashcard } from '../types';
 import { StorageService } from '../services/storage';
 import { Button } from './ui/Button';
+import { ConfirmationModal } from './ui/ConfirmationModal';
+import { useData } from '../contexts/DataContext';
 
 interface DeckDetailProps {
   deck: Deck;
@@ -12,6 +14,7 @@ interface DeckDetailProps {
 }
 
 export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStudy, onUpdateDeck }) => {
+  const { getCardsByDeck, refreshData } = useData();
   const [cards, setCards] = useState<Flashcard[]>([]);
   
   // Deck Name Editing State
@@ -29,18 +32,17 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
   const [answer, setAnswer] = useState('');
   const [error, setError] = useState('');
 
+  // Delete State
+  const [deleteCardId, setDeleteCardId] = useState<string | null>(null);
+
   useEffect(() => {
-    loadCards();
-  }, [deck.id]);
+    // Use context data instead of direct storage call
+    setCards(getCardsByDeck(deck.id));
+  }, [deck.id, getCardsByDeck]);
 
   useEffect(() => {
     setCurrentDeckName(deck.name);
   }, [deck.name]);
-
-  const loadCards = async () => {
-    const deckCards = await StorageService.getCardsByDeck(deck.id);
-    setCards(deckCards);
-  };
 
   // Deck Name Handlers
   const openEditDeckModal = () => {
@@ -59,6 +61,7 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
     
     try {
       await StorageService.updateDeckName(deck.id, trimmed);
+      await refreshData();
       setCurrentDeckName(trimmed);
       if (onUpdateDeck) {
         onUpdateDeck({ ...deck, name: trimmed });
@@ -107,17 +110,18 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
       } else {
         await StorageService.addCard(deck.id, question, answer);
       }
+      await refreshData();
       setIsModalOpen(false);
-      loadCards();
     } catch (err: any) {
       setError(err.message || "Failed to save card");
     }
   };
 
-  const handleDeleteCard = async (id: string) => {
-    if (confirm('Delete this card?')) {
-      await StorageService.deleteCard(id);
-      loadCards();
+  const confirmDeleteCard = async () => {
+    if (deleteCardId) {
+      await StorageService.deleteCard(deleteCardId);
+      await refreshData();
+      setDeleteCardId(null);
     }
   };
 
@@ -151,7 +155,7 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
           {cards.length === 0 ? (
             <div className="text-center py-16">
               <p className="text-gray-500 mb-4">No cards in this deck yet.</p>
-              <Button variant="secondary" onClick={openCreateModal}>Add Your First Card</Button>
+              <Button variant="ghost" onClick={openCreateModal}>Add Your First Card</Button>
             </div>
           ) : (
             cards.map((card) => (
@@ -168,7 +172,10 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
                    <button onClick={() => openEditModal(card)} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg">
                       <Edit2 size={18} />
                    </button>
-                   <button onClick={() => handleDeleteCard(card.id)} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg">
+                   <button 
+                    onClick={() => setDeleteCardId(card.id)} 
+                    className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg"
+                   >
                       <Trash2 size={18} />
                    </button>
                 </div>
@@ -183,7 +190,7 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
         <div className="max-w-2xl mx-auto w-full flex gap-3">
           <Button 
             onClick={openCreateModal} 
-            variant="secondary" 
+            variant="ghost" 
             className="flex-1"
           >
             <Plus size={20} /> Add Card
@@ -219,7 +226,7 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
                             autoFocus
                         />
                         {editDeckError && <p className="text-red-500 text-sm mb-3">{editDeckError}</p>}
-                        <Button type="submit" fullWidth>Save Changes</Button>
+                        <Button type="submit" className="w-full">Save Changes</Button>
                     </form>
                 </div>
             </div>
@@ -268,11 +275,21 @@ export const DeckDetail: React.FC<DeckDetailProps> = ({ deck, onBack, onStartStu
             </div>
 
             <div className="p-4 border-t border-gray-100 bg-gray-50 rounded-b-2xl">
-              <Button type="submit" form="cardForm" fullWidth>Save Card</Button>
+              <Button type="submit" form="cardForm" className="w-full">Save Card</Button>
             </div>
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={!!deleteCardId}
+        title="Delete Card"
+        description="Are you sure you want to delete this card? This action cannot be undone."
+        confirmLabel="Delete Card"
+        variant="danger"
+        onConfirm={confirmDeleteCard}
+        onCancel={() => setDeleteCardId(null)}
+      />
     </div>
   );
 };

@@ -6,6 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 const STORAGE_KEYS = {
   DECKS: 'memoracard_decks',
   CARDS: 'memoracard_cards',
+  SESSION: 'memoracard_session',
 } as const;
 
 // MVP Limits
@@ -21,6 +22,12 @@ const DEFAULT_SETTINGS: SpacedRepetitionSettings = {
   hardMultiplier: 1.2,
   easyBonus: 1.3
 };
+
+export interface SavedSessionState {
+  deckId: string;
+  queue: Flashcard[];
+  incorrectCardIds: string[];
+}
 
 export class StorageService {
   // --- Core Data Access Methods (Async) ---
@@ -95,7 +102,6 @@ export class StorageService {
 
   static async getCardsByDeck(deckId: string): Promise<Flashcard[]> {
     const allCards = await this.getAllCards();
-    const now = Date.now();
     
     return allCards
       .filter(card => card.deckId === deckId)
@@ -168,24 +174,33 @@ export class StorageService {
 
   // --- Helper Methods for Application Logic ---
 
-  static async createDeck(name: string): Promise<Deck> {
+  static async createDeck(name: string): Promise<void> {
     const decks = await this.getAllDecks();
     if (decks.length >= LIMITS.MAX_DECKS) {
       throw new Error(`Cannot create deck. Limit of ${LIMITS.MAX_DECKS} decks reached.`);
     }
 
-    const newDeck: Deck = {
-      id: uuidv4(),
-      name: name.trim(),
-      description: '',
-      createdAt: Date.now(),
-      lastStudiedAt: null,
-      cardCount: 0,
-      settings: { ...DEFAULT_SETTINGS }
-    };
-    
-    await this.saveDeck(newDeck);
-    return newDeck;
+    try {
+      const newDeck: Deck = {
+        id: `deck-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        name,
+        description: '',
+        createdAt: Date.now(),
+        lastStudiedAt: null,
+        cardCount: 0,
+        settings: {
+          initialInterval: 1,
+          easeFactor: 2.5,
+          hardMultiplier: 1.2,
+          easyBonus: 1.3
+        }
+      };
+
+      await this.saveDeck(newDeck);
+    } catch (error) {
+      console.error('Error creating deck:', error);
+      throw error;
+    }
   }
 
   static async updateDeckName(id: string, name: string): Promise<void> {
@@ -323,5 +338,24 @@ export class StorageService {
       decks[deckIndex].cardCount = cards.length;
       localStorage.setItem(STORAGE_KEYS.DECKS, JSON.stringify(decks));
     }
+  }
+
+  // --- Session Persistence ---
+
+  static async saveSession(state: SavedSessionState): Promise<void> {
+    localStorage.setItem(STORAGE_KEYS.SESSION, JSON.stringify(state));
+  }
+
+  static async getActiveSession(): Promise<SavedSessionState | null> {
+    try {
+      const json = localStorage.getItem(STORAGE_KEYS.SESSION);
+      return json ? JSON.parse(json) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  static async clearSession(): Promise<void> {
+    localStorage.removeItem(STORAGE_KEYS.SESSION);
   }
 }

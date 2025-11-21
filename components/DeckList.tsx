@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Plus, BookOpen, Trash2, CalendarClock } from 'lucide-react';
 import { Deck } from '../types';
 import { StorageService } from '../services/storage';
 import { Button } from './ui/Button';
+import { ConfirmationModal } from './ui/ConfirmationModal';
+import { useData } from '../contexts/DataContext';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 
@@ -13,27 +15,13 @@ interface DeckListProps {
 }
 
 export const DeckList: React.FC<DeckListProps> = ({ onSelectDeck }) => {
-  const [decks, setDecks] = useState<Deck[]>([]);
+  const { decks, loading, refreshData } = useData();
   const [isCreating, setIsCreating] = useState(false);
   const [newDeckName, setNewDeckName] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    loadDecks();
-  }, []);
-
-  const loadDecks = async () => {
-    setLoading(true);
-    try {
-      const data = await StorageService.getAllDecks();
-      setDecks(data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Delete Modal State
+  const [deleteDeckId, setDeleteDeckId] = useState<string | null>(null);
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -45,20 +33,20 @@ export const DeckList: React.FC<DeckListProps> = ({ onSelectDeck }) => {
     
     try {
       await StorageService.createDeck(trimmed);
+      await refreshData();
       setNewDeckName('');
       setIsCreating(false);
       setError('');
-      loadDecks();
     } catch (err: any) {
       setError(err.message || 'Failed to create deck');
     }
   };
 
-  const handleDelete = async (e: React.MouseEvent, id: string) => {
-    e.stopPropagation();
-    if (confirm('Are you sure you want to delete this deck? This cannot be undone.')) {
-      await StorageService.deleteDeck(id);
-      loadDecks();
+  const confirmDelete = async () => {
+    if (deleteDeckId) {
+      await StorageService.deleteDeck(deleteDeckId);
+      await refreshData();
+      setDeleteDeckId(null);
     }
   };
 
@@ -134,7 +122,10 @@ export const DeckList: React.FC<DeckListProps> = ({ onSelectDeck }) => {
                       </div>
                     </div>
                     <button
-                      onClick={(e) => handleDelete(e, deck.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteDeckId(deck.id);
+                      }}
                       className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-full transition-colors"
                       title="Delete Deck"
                     >
@@ -147,6 +138,16 @@ export const DeckList: React.FC<DeckListProps> = ({ onSelectDeck }) => {
           )}
         </div>
       </main>
+
+      <ConfirmationModal
+        isOpen={!!deleteDeckId}
+        title="Delete Deck"
+        description="Are you sure you want to delete this deck? All cards within it will be permanently lost. This action cannot be undone."
+        confirmLabel="Delete Deck"
+        variant="danger"
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleteDeckId(null)}
+      />
     </div>
   );
 };
